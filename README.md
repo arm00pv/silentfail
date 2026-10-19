@@ -103,10 +103,12 @@ repos:
   363 of those were medium. A tool that greets you with 363 maybes is a tool you filter out, so the
   aggressive rules are one flag away and honest about being maybes.
 - **No autofix.** These bugs need a decision, not a rewrite.
-- **Generalisation is the open question.** The corpus was written by one person against one estate.
-  The measured 0/59 on clean cases is a statement about *this* corpus and nothing more. The test
-  that would settle it: strangers running it cold on repos the author never saw. If that produces
-  false positives above ~10%, the corpus is the bug and the tool is the symptom.
+- **Generalisation has a first measurement.** Run cold on 3,900 files of other people's code
+  (flask, requests, poetry, dokku, scrapy) it made **zero high-confidence findings** and nine
+  `medium` maybes: eight deliberate idioms, one that looks like a real latent bug in a stranger's
+  CI script, and two the linter got wrong at `medium`/`low`. Recall on stranger code is still
+  unmeasured - there is no ground truth there, and quiet is not the same as correct. Method, file
+  counts and every adjudication: [docs/falsifier.md](docs/falsifier.md).
 - **Known false-positive families** already fixed and kept as fixtures: report tools that print
   statistics and never decide on them, test files that read a deployed path because reading it is
   the test, and element selectors mistaken for checks.

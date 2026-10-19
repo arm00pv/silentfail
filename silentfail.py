@@ -333,8 +333,11 @@ def scan_check_cannot_fail_py(path):
                 # all: it falls through to the function's own success return. corpus_cases2's
                 # space_report writes "if free < FLOOR: print('LOW')" and returns 0 after the
                 # if/else, and the branch-local rule reported silence on a textbook cron check.
-                has_return = any(isinstance(n2, ast.Return) for n2 in ast.walk(node))
-                # AND THE FILE HAS TO BE A CHECK. Without this, view_redacted.py's
+                # AND A BRANCH THAT RAISES DOES SIGNAL. poetry's scripts/check_argv0.py raises
+                # RuntimeError on every failing path and was reported as a silent pass, because
+                # the rule only looked for a return; found by running the linter cold on a
+                # stranger's repository, which is what the falsifier is for.
+                has_return = any(isinstance(n2, (ast.Return, ast.Raise)) for n2 in ast.walk(node))                # AND THE FILE HAS TO BE A CHECK. Without this, view_redacted.py's
                 # "if len(lines) > max_lines: print('... N more lines')" - a cosmetic notice in a
                 # viewer that returns 0 by design - became a high finding on this estate's own
                 # tools the moment the fall-through rule existed. Fall-through proves nothing
@@ -421,9 +424,16 @@ def scan_check_cannot_fail_sh(path):
         out.append(finding('check-cannot-fail', path, text[:start].count(chr(10)) + 1, conf,
                            'the failure branch exits 0: nobody downstream can tell it failed'))
     for line_no, line in enumerate(lines, 1):
-        if re.search(r'\|\|\s*(true|:)\s*$', line) or re.search(r'2>&1\s*\|\|\s*true', line):
-            out.append(finding('check-cannot-fail', path, line_no, 'medium',
-                               'a failure is swallowed with || %s' % line.strip()[-12:]))
+        s = line.strip()
+        if not (re.search(r'\|\|\s*(?:true|:)(?:\s|$)', s) or re.search(r'2>&1\s*\|\|\s*true', s)):
+            continue
+        # QUOTE THE CLAUSE THAT IS BEING SWALLOWED. The first version sliced the last 12 characters
+        # of the line, so dokku's 'docker rm -f "$C" >/dev/null 2>&1 || true' was reported as
+        # 'a failure is swallowed with || ull 2>&1 || true' - evidence a reader cannot act on, and
+        # this file's own rule about a control that cannot say what it saw.
+        clause = s.split('||')[0].strip()
+        out.append(finding('check-cannot-fail', path, line_no, 'medium',
+                           'a failing command is swallowed: %s || ...' % clause[-60:]))
     return _dedupe(out)
 
 # ---------------------------------------------------------------- 2. control-reads-own-text
@@ -1358,6 +1368,27 @@ def selftest():
               len(scan_check_cannot_fail_sh(bad_sh)) == 1, scan_check_cannot_fail_sh(bad_sh))
         check('shell-propagates-quiet',
               scan_check_cannot_fail_sh(good_sh) == [], scan_check_cannot_fail_sh(good_sh))
+
+        # FIXTURES FOR THE TWO FIXES THE FALSIFIER FORCED. Running the linter cold on strangers'
+        # repositories produced a false positive (a branch that raises, in poetry) and an
+        # unusable evidence string (a 12-character slice, on dokku). Each fix gets the fixture
+        # that would have caught it.
+        raise_ok = os.path.join(fix, 'check_raise.py')
+        open(raise_ok, 'w', encoding='utf-8', newline=chr(10)).write(
+            'import sys' + chr(10) + 'def main():' + chr(10) +
+            '    if len(sys.argv) < 2:' + chr(10) +
+            "        raise SystemExit('usage: check_raise PATH')" + chr(10) +
+            '    return 0' + chr(10))
+        check('branch-that-raises-quiet',
+              scan_check_cannot_fail_py(raise_ok) == [], scan_check_cannot_fail_py(raise_ok))
+
+        swallow = os.path.join(fix, 'swallow.sh')
+        open(swallow, 'w', encoding='utf-8', newline=chr(10)).write(
+            '#!/bin/sh' + chr(10) + 'docker rm -f box >/dev/null 2>&1 || true' + chr(10))
+        got_swallow = scan_check_cannot_fail_sh(swallow)
+        check('swallowed-failure-quotes-the-command',
+              len(got_swallow) == 1 and 'docker rm -f box' in got_swallow[0]['evidence'],
+              [(f['line'], f['evidence']) for f in got_swallow])
 
         subj = os.path.join(fix, 'subject.py')
         open(subj, 'w', encoding='utf-8', newline=chr(10)).write(
