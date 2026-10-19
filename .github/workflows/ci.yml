@@ -1,0 +1,32 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: rules still self-test (every detector falsified in both directions)
+        run: python silentfail.py --selftest
+
+      - name: corpus certificate
+        run: python certify.py
+
+      - name: the gate must still refuse a check that cannot fail
+        run: |
+          mkdir -p /tmp/gate
+          printf "#!/bin/sh\nif df -h / | grep -q 9[0-9]%%; then\n    echo DISK_ALMOST_FULL\n    exit 0\nfi\nexit 0\n" > /tmp/gate/nightly.sh
+          if python silentfail.py /tmp/gate/nightly.sh; then
+            echo "FAIL: passed a check that cannot fail"
+            exit 1
+          fi
+
+      - name: the gate must stay quiet on the same check done correctly
+        run: |
+          printf "#!/bin/sh\nif df -h / | grep -q 9[0-9]%%; then\n    echo DISK_ALMOST_FULL\n    exit 3\nfi\nexit 0\n" > /tmp/gate/clean.sh
+          python silentfail.py /tmp/gate/clean.sh

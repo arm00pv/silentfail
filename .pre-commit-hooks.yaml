@@ -1,0 +1,8 @@
+- id: silentfail
+  name: silentfail
+  description: Find checks that cannot fail, records nothing reads, and tests that replace their subject.
+  entry: silentfail
+  language: python
+  types_or: [python, shell]
+  pass_filenames: true
+  require_serial: true
