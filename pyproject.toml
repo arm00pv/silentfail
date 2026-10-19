@@ -25,4 +25,4 @@ Homepage = "https://github.com/arm00pv/silentfail"
 silentfail = "silentfail:main"
 
 [tool.setuptools]
-py-modules = ["silentfail"]
+py-modules = ["silentfail", "corpus_data"]

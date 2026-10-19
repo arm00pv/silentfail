@@ -1235,11 +1235,15 @@ def _ship_corpus(dest=None):
     pass this linter exists to find. So the corpus travels with the module and is planted into a
     throwaway directory when the bench copy is absent.
     """
-    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'corpus.json')
-    if not os.path.isfile(src):
-        return None
-    with open(src, encoding='utf-8') as fh:
-        data = json.load(fh)
+    try:
+        import corpus_data
+        data = {'cases': corpus_data.CASES}
+    except Exception:
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'corpus.json')
+        if not os.path.isfile(src):
+            return None
+        with open(src, encoding='utf-8') as fh:
+            data = json.load(fh)
     dest = dest or tempfile.mkdtemp(prefix='silentfail_ship_')
     for case, files in (data.get('cases') or {}).items():
         for name, body in files.items():

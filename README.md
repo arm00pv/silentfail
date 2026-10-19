@@ -75,6 +75,10 @@ silentfail --selftest                             # prove the rules still work
 
 Exit status is `0` with no findings, `1` with findings, `2` when it refuses to run.
 
+The corpus ships inside the package (`corpus_data.py`), so `silentfail --selftest` and
+`python certify.py` work after a plain `pip install`, on a machine that has never seen this
+repository.
+
 **pre-commit** — add to `.pre-commit-config.yaml`:
 
 ```yaml

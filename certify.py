@@ -25,8 +25,11 @@ TOLERANCE = 3
 
 
 def load():
-    with open(os.path.join(HERE, "corpus.json"), encoding="utf-8") as fh:
-        return json.load(fh)
+    # THE CORPUS IS A MODULE, not a data file, so that it travels inside the installed wheel:
+    # a tool whose certificate only runs in its own checkout is a tool whose numbers you have
+    # to take on faith.
+    import corpus_data
+    return {"cases": corpus_data.CASES, "truth": corpus_data.TRUTH}
 
 
 def plant(root, corpus):
