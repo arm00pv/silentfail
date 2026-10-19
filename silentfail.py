@@ -192,13 +192,8 @@ def _ignored_status(path):
     two defects in thirteen appenders.
     """
     out = []
-    try:
-        with open(path, encoding='utf-8', errors='replace') as fh:
-            src = fh.read()
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            tree = ast.parse(src)
-    except (OSError, SyntaxError, ValueError):
+    src, tree = _src_tree(path)
+    if tree is None:
         return out
     parents = {}
     for node in ast.walk(tree):
@@ -279,8 +274,34 @@ def _limit_compare(node):
     return None
 
 
-def scan_check_cannot_fail_py(path):
-    out = []
+# ---------------------------------------------------------------- read and parse once
+
+_SRC = {}
+_TREES = {}
+
+
+CHECK_NAME_HINT = re.compile(r'(check|verify|guard|scan|watch|probe|health|valid|assert|probe)',
+                             re.I)
+
+
+def _src_tree(path):
+    """Read and parse a Python file ONCE per scan, and return (source, tree).
+
+    WHY THIS EXISTS. Every Python detector opened and parsed the same file, so one scan cost six
+    reads and six ast.parse() calls per file. Measured: the CPython standard library (2,417 files)
+    took 137 s, and almost all of it was parsing the same bytes over and over. Keyed by path, mtime
+    and size so an edit is noticed, bounded so a large tree cannot eat memory, and (None, None) on
+    anything unreadable or unparsable - the callers already treat that as nothing to say.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None, None
+    key = (path, st.st_mtime_ns, st.st_size)
+    if key in _SRC:
+        return _SRC[key], _TREES.get(key)
+    src = None
+    tree = None
     try:
         with open(path, encoding='utf-8', errors='replace') as fh:
             src = fh.read()
@@ -290,9 +311,24 @@ def scan_check_cannot_fail_py(path):
             warnings.simplefilter('ignore')
             tree = ast.parse(src)
     except (OSError, SyntaxError, ValueError):
+        src = None
+        tree = None
+    if len(_SRC) > 1200:
+        _SRC.clear()
+        _TREES.clear()
+    _SRC[key] = src
+    _TREES[key] = tree
+    return src, tree
+
+
+def scan_check_cannot_fail_py(path):
+    out = []
+    src, tree = _src_tree(path)
+    if tree is None:
         return out
-    name_hint = re.compile(r'(check|verify|guard|scan|watch|probe|health|valid|assert|probe)',
-                           re.I)
+    # COMPILED ONCE, NOT PER FILE. re.compile does not cache, and this ran for every Python file in
+    # the tree.
+    name_hint = CHECK_NAME_HINT
     for func in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
         # THE RULE IS "a branch that FOUND the problem and returned success", not "a function whose
         # returns all happen to be 0". The first version of this detector said the second thing and
@@ -758,12 +794,8 @@ def scan_test_replaces_subject(files):
     for path in subjects:
         if not path.endswith('.py'):
             continue
-        try:
-            with open(path, encoding='utf-8', errors='replace') as fh:
-                with warnings.catch_warnings():
-                    warnings.simplefilter('ignore')
-                    tree = ast.parse(fh.read())
-        except (OSError, SyntaxError, ValueError):
+        _text, tree = _src_tree(path)
+        if tree is None:
             continue
         funcs = {}
         for node in tree.body:
@@ -876,12 +908,8 @@ def scan_dead_guard(files):
     for path in files:
         if not path.lower().endswith('.py'):
             continue
-        try:
-            with open(path, encoding='utf-8', errors='replace') as fh:
-                with warnings.catch_warnings():
-                    warnings.simplefilter('ignore')
-                    tree = ast.parse(fh.read())
-        except (OSError, SyntaxError, ValueError):
+        _text, tree = _src_tree(path)
+        if tree is None:
             continue
         tree_of[path] = tree
         for node in tree.body:
@@ -960,16 +988,17 @@ def scan_unread_constant(path):
     out = []
     if not path.lower().endswith('.py'):
         return out
-    try:
-        with open(path, encoding='utf-8', errors='replace') as fh:
-            src = fh.read()
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            tree = ast.parse(src)
-    except (OSError, SyntaxError, ValueError):
+    src, tree = _src_tree(path)
+    if tree is None:
         return out
     if '__name__' not in src or '__main__' not in src:
         return out
+    # COUNT IDENTIFIERS ONCE. The first version ran re.findall(r'\bNAME\b', src) for every
+    # constant, which re-scanned the whole file per declaration; the standard library spent 31 s in
+    # this rule alone. One token pass answers every lookup the same way, word boundary and all.
+    tokens = {}
+    for tok in re.findall(r'[A-Za-z_][A-Za-z0-9_]*', src):
+        tokens[tok] = tokens.get(tok, 0) + 1
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
@@ -995,7 +1024,7 @@ def scan_unread_constant(path):
             # the __main__ test. Found by the falsifier.
             if not _looks_like_path(value):
                 continue
-            if len(re.findall(r'\b%s\b' % re.escape(name), src)) == 1:
+            if tokens.get(name, 0) == 1:
                 out.append(finding('record-unread', path, node.lineno, 'high',
                                    'declares %s and no line of this file reads it' % name))
     return out
@@ -1026,12 +1055,8 @@ def scan_printed_check(path):
     if not (CHECKISH.search(os.path.basename(path))
             or CHECKISH.search(os.path.basename(os.path.dirname(path)))):
         return out
-    try:
-        with open(path, encoding='utf-8', errors='replace') as fh:
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                tree = ast.parse(fh.read())
-    except (OSError, SyntaxError, ValueError):
+    _text, tree = _src_tree(path)
+    if tree is None:
         return out
     parents = {}
     for node in ast.walk(tree):
@@ -1441,6 +1466,17 @@ def selftest():
             'if __name__ == "__main__":' + chr(10) + '    pass' + chr(10))
         check('exported-value-constant-quiet',
               scan_unread_constant(exported) == [], scan_unread_constant(exported))
+        # THE PARSE CACHE MUST NOT SERVE A STALE TREE: scan a defective file, fix it, scan again.
+        stale = os.path.join(fix, 'stale_check.py')
+        body_bad = ('def f(value):' + chr(10) + "    tmp = value.replace('%', '')" + chr(10) +
+                    "    if '%' in tmp:" + chr(10) + '        return 1' + chr(10) + '    return 0' + chr(10))
+        open(stale, 'w', encoding='utf-8', newline=chr(10)).write(body_bad)
+        before = len(scan_dead_guard([stale]))
+        open(stale, 'w', encoding='utf-8', newline=chr(10)).write(
+            body_bad.replace("replace('%', '')", "replace('%%', '')"))
+        after = len(scan_dead_guard([stale]))
+        check('parse-cache-not-stale', before > 0 and after == 0, (before, after))
+
         record = os.path.join(fix, 'fragment.py')
         open(record, 'w', encoding='utf-8', newline=chr(10)).write(
             'FRAG = "/tmp/frag.md"' + chr(10) +

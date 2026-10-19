@@ -82,6 +82,20 @@ Speed is fine on shell and poor on Python, measured rather than guessed:
 | dokku (shell) | 1,814 | 0.59 |
 | CPython standard library (Python) | 2,417 | 137 |
 
-Single large Python files reach 1.7 s (`test_inspect.py`). Shell rules are regular expressions;
-Python rules walk the AST once per detector per file, so the cost is roughly detectors x files. That
-is the next performance item, not a design limit.
+A profile of the 2,273 Python files, per rule:
+
+| rule | seconds |
+|---|---|
+| `check-cannot-fail` (Python) | 60 |
+| `dead-guard` | 58 |
+| `unread-constant` | 20 |
+| `control-reads-own-text` | 14 |
+| `test-replaces-subject` | 8 |
+| `record-unread` | 6 |
+| `printed-check` | 0.6 |
+
+`dead-guard` walks the whole scope subtree once per function, so it is quadratic in functions per
+file; `check-cannot-fail` walks the tree several times per file. The fix is one pass per file feeding
+all rules, which is a real refactor rather than a cache. **A parse cache was added and did not move
+the total (137 s to 134 s)** - parsing was not the cost, which is exactly the kind of assumption this
+file exists to kill.
