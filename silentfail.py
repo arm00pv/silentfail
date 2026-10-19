@@ -645,7 +645,7 @@ def scan_record_unread(files):
         if path.lower().endswith(('.service', '.timer')):
             unit_lines += _lines(path)
         # A TEST IS NOT A PRODUCTION PEER. test_oom_delta.py reads
-        # /home/zixen15/.omni_brain/swap_headroom.state.json ON PURPOSE to verify the deployed
+        # /home/svc/.omni_brain/swap_headroom.state.json ON PURPOSE to verify the deployed
         # file, and the first version of this detector reported the watcher as writing a record
         # nobody reads - a false positive on two production files caused by a test harness doing
         # exactly what it should. The asymmetry that matters is between the code that runs and the
@@ -1279,7 +1279,7 @@ def selftest():
                            "        print('DISK-OVER-LIMIT",
                            "        print('DISK-OVER-LIMIT"),
             'leak_sentinel': ('sentinel.sh', '"$DIR"', '/srv/config'),
-            'notify_path': ('notify.py', 'expanduser(chr(126))', "'/home/zixen15'"),
+            'notify_path': ('notify.py', 'expanduser(chr(126))', "'/home/svc'"),
             'notify_test': ('test_notify.py', "os.environ['ESTATE_NOTIFY_CMD'] = 'true'", ''),
         }
         fixed_ok = True
@@ -1496,11 +1496,11 @@ def selftest():
               len(scan_record_unread([writer, lonely])) == 1, scan_record_unread([writer, lonely]))
         same = os.path.join(fix, 'same.py')
         open(same, 'w', encoding='utf-8', newline=chr(10)).write(
-            'import os' + chr(10) + "PATH = '/home/zixen15/state/rows.jsonl'" + chr(10) +
+            'import os' + chr(10) + "PATH = '/home/svc/state/rows.jsonl'" + chr(10) +
             'def count():' + chr(10) + '    with open(PATH) as fh:' + chr(10) +
             '        return 1' + chr(10))
         open(writer, 'w', encoding='utf-8', newline=chr(10)).write(
-            'import os' + chr(10) + "LEDGER = '/home/zixen15/state/rows.jsonl'" + chr(10))
+            'import os' + chr(10) + "LEDGER = '/home/svc/state/rows.jsonl'" + chr(10))
         check('record-unread-quiet-when-paths-agree',
               scan_record_unread([writer, same]) == [], scan_record_unread([writer, same]))
 
