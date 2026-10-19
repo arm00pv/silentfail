@@ -80,9 +80,9 @@ Speed is fine on shell and poor on Python, measured rather than guessed:
 | sample | files | seconds |
 |---|---|---|
 | dokku (shell) | 1,814 | 0.59 |
-| CPython standard library (Python) | 2,417 | 137 |
+| CPython standard library (Python) | 2,417 | 142 before, 89 after |
 
-A profile of the 2,273 Python files, per rule:
+A profile of the 2,273 Python files, per rule, at v0.1.5:
 
 | rule | seconds |
 |---|---|
@@ -94,8 +94,36 @@ A profile of the 2,273 Python files, per rule:
 | `record-unread` | 6 |
 | `printed-check` | 0.6 |
 
-`dead-guard` walks the whole scope subtree once per function, so it is quadratic in functions per
-file; `check-cannot-fail` walks the tree several times per file. The fix is one pass per file feeding
-all rules, which is a real refactor rather than a cache. **A parse cache was added and did not move
-the total (137 s to 134 s)** - parsing was not the cost, which is exactly the kind of assumption this
-file exists to kill.
+`dead-guard` walked the whole scope subtree once per function, so it was quadratic in functions per
+file; `check-cannot-fail` walks the tree several times per file.
+
+## The cache that did not help, and the assumption behind it
+
+**A parse cache was added and did not move the total (137 s to 134 s), and I wrote that down as
+"parsing was not the cost". That conclusion was wrong, and the way it was wrong is worth keeping.**
+Counting calls instead of guessing: the scan made **4,365 `ast.parse` calls for 2,273 files**, and
+2,499 of them were re-parsing a file the scan had already opened. The cache cleared itself above
+1,200 files, which is *below* the size of the corpus being measured, so every later pass began cold.
+A cache that evicts its own working set looks exactly like a cache that was never needed.
+
+Two changes, each measured separately:
+
+| | `ast.parse` calls | wall | resident |
+|---|---|---|---|
+| v0.1.5 | 4,365 | 142.3 s | see note |
+| the three cross-file rules collect per file instead of re-iterating | 1,866 | **89.1 s** | lower |
+
+The three cross-file rules (`record-unread`, `test-replaces-subject`, `dead-guard`) answer
+questions that span files, so they still decide last - but they now take one file's facts at the
+moment that file is open, instead of re-opening all 2,273 files afterwards. `dead-guard` no longer
+keeps every parse tree alive; it keeps the small facts the decision actually needs.
+
+**A 48 MB byte-budget cache was also measured and rejected.** It reached the same 1,866 parses but
+sat at 890 MB resident and 1,414 MB peak, because an AST is an order of magnitude larger than its
+source. One pass per file is cheaper than holding the corpus, which is precisely the "heavy
+process" this tool has no business being.
+
+Findings were byte-identical before and after on nine corpora (flask, requests, poetry, dokku,
+scrapy, this repository, memory-conformance, retained, a 102-finding estate tree), and the
+self-test and the 105-case corpus stayed green - the refactor is only worth anything if the
+answers did not move.

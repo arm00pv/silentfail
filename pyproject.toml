@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "silentfail"
-version = "0.1.0"
+version = "0.1.6"
 description = "Find the four defect classes that make a system lie while reporting success."
 readme = "README.md"
 requires-python = ">=3.8"
