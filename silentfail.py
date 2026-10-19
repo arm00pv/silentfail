@@ -921,10 +921,40 @@ def scan_dead_guard(files):
     for path, tree in tree_of.items():
         scopes = [tree] + [n for n in ast.walk(tree)
                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        # ONE WALK, NOT ONE PER SCOPE. This detector used to re-walk the whole subtree for every
+        # function in the file, so a file with F functions and N nodes cost O(F x N): measured at
+        # 58 s of a 134 s standard-library scan, the single slowest rule. Now the tree is walked
+        # once, each node is attached to every scope that encloses it, and the per-scope loop reads
+        # from those lists. THE SEMANTICS ARE DELIBERATELY UNCHANGED - a node inside a nested
+        # function still belongs to the outer scope too, because that is what the old code did and
+        # what the corpus certifies.
+        parents = {}
+        assigns = []
+        compares = []
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+            if isinstance(node, ast.Assign):
+                assigns.append(node)
+            elif isinstance(node, ast.Compare):
+                compares.append(node)
+        assigns_by_scope = {id(s): [] for s in scopes}
+        compares_by_scope = {id(s): [] for s in scopes}
+        # ONLY THE NODES THAT MATTER PAY FOR A SCOPE CHAIN. The first version of this loop walked up
+        # the parent chain for every node in the tree and made the rule SLOWER than the quadratic
+        # version it replaced (102 s against 58 s) - a fix that is worse than the bug is not a fix,
+        # and measuring before writing the changelog is what caught it.
+        for node, bucket in ([(n, assigns_by_scope) for n in assigns]
+                             + [(n, compares_by_scope) for n in compares]):
+            cur = node
+            bucket[id(tree)].append(node)
+            while cur in parents:
+                cur = parents[cur]
+                if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    bucket[id(cur)].append(node)
         for scope in scopes:
             taint = {}
-            assigns = sorted([n for n in ast.walk(scope) if isinstance(n, ast.Assign)],
-                             key=lambda n: getattr(n, 'lineno', 0))
+            assigns = sorted(assigns_by_scope[id(scope)], key=lambda n: getattr(n, 'lineno', 0))
             for node in assigns:
                 if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
                     continue
@@ -941,9 +971,7 @@ def scan_dead_guard(files):
                 taint[name] = (node.lineno, chars | (prev[1] if prev else set()))
             if not taint:
                 continue
-            for node in ast.walk(scope):
-                if not isinstance(node, ast.Compare):
-                    continue
+            for node in compares_by_scope[id(scope)]:
                 if not any(isinstance(op, ast.In) for op in node.ops):
                     continue
                 left = _const_str(node.left)
