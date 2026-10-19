@@ -103,12 +103,18 @@ repos:
   363 of those were medium. A tool that greets you with 363 maybes is a tool you filter out, so the
   aggressive rules are one flag away and honest about being maybes.
 - **No autofix.** These bugs need a decision, not a rewrite.
-- **Generalisation has a first measurement.** Run cold on 3,900 files of other people's code
+- **Generalisation has a first measurement, and it cost 14 false positives to get right.** Run cold
+  on 3,900 files of other people's code
   (flask, requests, poetry, dokku, scrapy) it made **zero high-confidence findings** and nine
   `medium` maybes: eight deliberate idioms, one that looks like a real latent bug in a stranger's
   CI script, and two the linter got wrong at `medium`/`low`. Recall on stranger code is still
-  unmeasured - there is no ground truth there, and quiet is not the same as correct. Method, file
-  counts and every adjudication: [docs/falsifier.md](docs/falsifier.md).
+  unmeasured - there is no ground truth there, and quiet is not the same as correct.
+  On the CPython standard library (2,417 files) the first run produced **14 high-confidence
+  findings and every one was wrong**: eleven exported constants read by importers, and three
+  `configparser` guards that test for a bare `%` after `replace('%%', '')` - which strips escaped
+  pairs and leaves the bare percent alone. Both misreadings are fixed, the self-test grew to 46
+  checks, and the same 2,417 files now produce zero. Method, file counts and every adjudication:
+  [docs/falsifier.md](docs/falsifier.md).
 - **Known false-positive families** already fixed and kept as fixtures: report tools that print
   statistics and never decide on them, test files that read a deployed path because reading it is
   the test, and element selectors mistaken for checks.

@@ -24,6 +24,7 @@ adjudicated by hand into one of three verdicts:
 | dokku/dokku | 1,814 | **0** | 7 | 0 |
 | scrapy/scrapy | 735 | **0** | 1 | 1 |
 | **total** | **3,900** | **0** | 9 | 1 |
+| *CPython standard library* | *2,417* | *14 -> 0* | *1* | *7* |
 
 **Zero high-confidence findings across 3,900 files of other people's Python and shell.** The tool
 made no accusation at the floor it runs at by default.
@@ -37,7 +38,23 @@ made no accusation at the floor it runs at by default.
 | scrapy `core/downloader/tls.py:157` | **false positive** - `if depth != 0: return True` is a guard clause that only verifies the leaf certificate, with the reason written in the comment above it. Reported at `medium`, not at the default floor. |
 | scrapy `utils/project.py:43` | **false positive** - an `os.walk` in a file that mentions `SCRAPY_SETTINGS_MODULE`; the rule is looking for a scanner that matches its own text and found only a name. `low`. |
 
-## Two defects the falsifier found in the tool
+## The sixth sample: the CPython standard library, and 14 false positives
+
+2,417 files, 157 s, **14 high-confidence findings** - and every one of them was wrong. Two
+misreadings, each fixed:
+
+| what the linter said | what the code does |
+|---|---|
+| 11 x `record-unread`: "declares `ABORT` and no line of this file reads it" (`tkinter/messagebox.py`, `test/pickletester.py`, `test/support/__init__.py`, ...) | these are **exported values**, read by importers. The rule requires a `__main__` guard to mean "script, not library", and these modules satisfy it with a demo block. The rule now also requires the value to look like a file path, which is what a record is. |
+| 3 x `check-cannot-fail`: "tests for `%` in `tmp_value` after `tmp_value` was normalised to remove it" (`configparser.py` x2, `sysconfig/__main__.py`) | `value.replace("%%", "")` strips **escaped pairs**; a bare `%` survives and the guard fires exactly as designed. A doubled pattern removes pairs, not the character. Fixed. |
+
+After both fixes: 2,417 files, **0 high findings**, and the corpus still certifies 46/46 with zero
+false positives. Four new self-test fixtures pin the behaviour in both directions.
+
+This is the most useful result in the file. The corpus could not have found these - it was written
+by the same person who wrote the rules. Only a large body of code written by other people could.
+
+## Two more defects the falsifier found in the tool
 
 1. **A branch that raises was reported as a silent pass.** poetry's `scripts/check_argv0.py` raises
    `RuntimeError` on every failing path; the rule only looked for a `return`, so a check that

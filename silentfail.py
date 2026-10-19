@@ -847,14 +847,20 @@ def _removed_chars(node):
         if not isinstance(call, ast.Call):
             continue
         name = getattr(call.func, 'attr', None)
-        if name == 'replace' and len(call.args) >= 2:
+        if name in ('replace', 'sub') and len(call.args) >= 2:
             a, b = _const_str(call.args[0]), _const_str(call.args[1])
-            if a and b is not None:
-                removed |= set(a) - set(b)
-        elif name == 'sub' and len(call.args) >= 2:
-            a, b = _const_str(call.args[0]), _const_str(call.args[1])
-            if a and b is not None and len(a) <= 3:
-                removed |= set(_unescape(a)) - set(b)
+            if not a or b is None:
+                continue
+            if name == 'sub' and len(a) > 3:
+                continue
+            a = _unescape(a)
+            # A DOUBLED PATTERN REMOVES PAIRS, NOT THE CHARACTER. configparser.py strips escaped
+            # percents with value.replace('%%', '') and then asks 'if "%" in tmp_value', which can
+            # absolutely fire because a bare percent survives. The rule read that as 'removed %'
+            # and called three healthy standard-library guards dead. Found by the falsifier.
+            if len(set(a)) == 1 and len(a) > 1:
+                continue
+            removed |= set(a) - set(b)
     return removed
 
 
@@ -931,6 +937,18 @@ def scan_dead_guard(files):
 
 # ---------------------------------------------------------------- 6. constant nothing reads
 
+def _looks_like_path(value):
+    """A string that addresses a file: absolute, home-anchored, or carrying a known extension."""
+    v = (value or '').strip()
+    if not v or '://' in v:
+        return False
+    if v.startswith('/') or v.startswith('./') or v.startswith('~/'):
+        return True
+    if re.match(r'^[A-Za-z]:[\\/]', v):
+        return True
+    return bool(re.search(r'\.(md|txt|json|jsonl|csv|tsv|log|yaml|yml|toml|sh|py|conf|ini|cfg|db|sqlite|sqlite3|gz|xz|zip|xml|html|lock|state)$', v))
+
+
 def scan_unread_constant(path):
     """A module-level constant that no line of this file ever reads.
 
@@ -970,6 +988,12 @@ def scan_unread_constant(path):
                         pairs.append((t.id, _const_str(v)))
         for name, value in pairs:
             if value is None or not re.fullmatch(r'[A-Z][A-Z0-9_]{1,}', name):
+                continue
+            # AND THE VALUE HAS TO BE A RECORD'S ADDRESS. The rule's premise is a path written and
+            # never read back; a constant holding 'abort' or 'legacy C-API' is an exported value,
+            # and eleven standard-library modules were accused because their demo blocks satisfy
+            # the __main__ test. Found by the falsifier.
+            if not _looks_like_path(value):
                 continue
             if len(re.findall(r'\b%s\b' % re.escape(name), src)) == 1:
                 out.append(finding('record-unread', path, node.lineno, 'high',
@@ -1389,6 +1413,40 @@ def selftest():
         check('swallowed-failure-quotes-the-command',
               len(got_swallow) == 1 and 'docker rm -f box' in got_swallow[0]['evidence'],
               [(f['line'], f['evidence']) for f in got_swallow])
+
+        # FIXTURES FOR THE TWO STANDARD-LIBRARY FALSE POSITIVES. Eleven exported constants and
+        # three healthy configparser guards were accused; both were the rule misreading what the
+        # code does, and both keep the case that motivated the rule.
+        pair = os.path.join(fix, 'interpolate.py')
+        open(pair, 'w', encoding='utf-8', newline=chr(10)).write(
+            'def before_set(value):' + chr(10) +
+            "    tmp = value.replace('%%', '')" + chr(10) +
+            "    if '%' in tmp:" + chr(10) +
+            "        raise ValueError('bad interpolation')" + chr(10) +
+            '    return value' + chr(10))
+        check('doubled-pattern-strip-quiet',
+              scan_dead_guard([pair]) == [], scan_dead_guard([pair]))
+        single = os.path.join(fix, 'deadguard.py')
+        open(single, 'w', encoding='utf-8', newline=chr(10)).write(
+            'def f(value):' + chr(10) +
+            "    tmp = value.replace('%', '')" + chr(10) +
+            "    if '%' in tmp:" + chr(10) +
+            '        return 1' + chr(10) +
+            '    return 0' + chr(10))
+        check('single-char-strip-fires',
+              len(scan_dead_guard([single])) == 1, scan_dead_guard([single]))
+        exported = os.path.join(fix, 'exported.py')
+        open(exported, 'w', encoding='utf-8', newline=chr(10)).write(
+            'ABORT = "abort"' + chr(10) +
+            'if __name__ == "__main__":' + chr(10) + '    pass' + chr(10))
+        check('exported-value-constant-quiet',
+              scan_unread_constant(exported) == [], scan_unread_constant(exported))
+        record = os.path.join(fix, 'fragment.py')
+        open(record, 'w', encoding='utf-8', newline=chr(10)).write(
+            'FRAG = "/tmp/frag.md"' + chr(10) +
+            'if __name__ == "__main__":' + chr(10) + '    pass' + chr(10))
+        check('unread-record-path-fires',
+              len(scan_unread_constant(record)) == 1, scan_unread_constant(record))
 
         subj = os.path.join(fix, 'subject.py')
         open(subj, 'w', encoding='utf-8', newline=chr(10)).write(
