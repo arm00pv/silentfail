@@ -2,6 +2,8 @@
 
 **Find the four defect classes that make a system lie while reporting success.**
 
+[![ci](https://github.com/arm00pv/silentfail/actions/workflows/ci.yml/badge.svg)](https://github.com/arm00pv/silentfail/actions/workflows/ci.yml)
+
 Nothing crashes. Nothing pages. The job reports success, the check prints a pass, the ledger says
 it wrote the row. The failure is silent, so it is discovered weeks later by a person who trusted it.
 
