@@ -108,10 +108,13 @@ A cache that evicts its own working set looks exactly like a cache that was neve
 
 Two changes, each measured separately:
 
-| | `ast.parse` calls | wall | resident |
+| | `ast.parse` calls | wall | peak resident |
 |---|---|---|---|
-| v0.1.5 | 4,365 | 142.3 s | see note |
-| the three cross-file rules collect per file instead of re-iterating | 1,866 | **89.1 s** | lower |
+| v0.1.5 | 4,365 | 142.3 s | 1,283 MB |
+| v0.1.6, the three cross-file rules collect per file instead of re-iterating | **1,866** | **89.1 s** | **275 MB** |
+
+Peak resident was sampled every 1.2 s from outside the process, because the in-process API for it
+returned zero on this platform and a memory number nobody measured is a memory number nobody has.
 
 The three cross-file rules (`record-unread`, `test-replaces-subject`, `dead-guard`) answer
 questions that span files, so they still decide last - but they now take one file's facts at the
@@ -119,9 +122,10 @@ moment that file is open, instead of re-opening all 2,273 files afterwards. `dea
 keeps every parse tree alive; it keeps the small facts the decision actually needs.
 
 **A 48 MB byte-budget cache was also measured and rejected.** It reached the same 1,866 parses but
-sat at 890 MB resident and 1,414 MB peak, because an AST is an order of magnitude larger than its
-source. One pass per file is cheaper than holding the corpus, which is precisely the "heavy
-process" this tool has no business being.
+sat at 890 MB resident and 1,414 MB peak - worse than the 1,283 MB the refactor had just removed -
+because an AST is an order of magnitude larger than its source. One pass per file is cheaper than
+holding the corpus. The linter runs on the same machine as the things it checks, so 275 MB against
+1,283 MB is not a detail.
 
 Findings were byte-identical before and after on nine corpora (flask, requests, poetry, dokku,
 scrapy, this repository, memory-conformance, retained, a 102-finding estate tree), and the
