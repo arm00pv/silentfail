@@ -75,7 +75,13 @@ kill criterion was about: does it accuse innocent code. At this sample, no.
 
 ## Performance
 
-Speed is fine on shell (`dokku`, 1,814 files, 0.59 s) and poor on Python: the standard library needs
-more than a minute per two thousand files, with single large files such as `test_inspect.py` taking
-1.7 s. Per-file cost is dominated by repeated whole-file scans inside the Python rules; that is the
-next performance item, not a design limit.
+Speed is fine on shell and poor on Python, measured rather than guessed:
+
+| sample | files | seconds |
+|---|---|---|
+| dokku (shell) | 1,814 | 0.59 |
+| CPython standard library (Python) | 2,417 | 137 |
+
+Single large Python files reach 1.7 s (`test_inspect.py`). Shell rules are regular expressions;
+Python rules walk the AST once per detector per file, so the cost is roughly detectors x files. That
+is the next performance item, not a design limit.
