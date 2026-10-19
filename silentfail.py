@@ -1226,6 +1226,32 @@ def _corpus():
     return os.path.join(HOME, '.dsh_bench', 'cases')
 
 
+def _ship_corpus(dest=None):
+    """Plant the corpus that SHIPS beside this module, and return the directory.
+
+    The selftest was written where the corpus lived in a bench directory outside the tool, and it
+    refused to run without it. A public tool cannot refuse its own selftest on a machine that only
+    pip-installed it, and it must not skip the checks either: a skipped check is the same silent
+    pass this linter exists to find. So the corpus travels with the module and is planted into a
+    throwaway directory when the bench copy is absent.
+    """
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'corpus.json')
+    if not os.path.isfile(src):
+        return None
+    with open(src, encoding='utf-8') as fh:
+        data = json.load(fh)
+    dest = dest or tempfile.mkdtemp(prefix='silentfail_ship_')
+    for case, files in (data.get('cases') or {}).items():
+        for name, body in files.items():
+            p = os.path.join(dest, case, name)
+            parent = os.path.dirname(p)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(p, 'w', encoding='utf-8', newline=chr(10)) as fh:
+                fh.write(body)
+    return dest
+
+
 def selftest():
     ok = fail = 0
     notes = []
@@ -1239,6 +1265,10 @@ def selftest():
             notes.append('FAIL %s -> %s' % (name, detail))
 
     cases = _corpus()
+    planted = None
+    if not os.path.isdir(cases):
+        planted = _ship_corpus()
+        cases = planted or cases
     truth = {
         'disk_guard': ('check-cannot-fail', 'check_disk.py'),
         'leak_sentinel': ('control-reads-own-text', 'sentinel.sh'),
@@ -1533,6 +1563,9 @@ def selftest():
               scan_record_unread([writer, testread]))
     finally:
         shutil.rmtree(fix, ignore_errors=True)
+
+    if planted:
+        shutil.rmtree(planted, ignore_errors=True)
 
     # The linter must survive what it cannot read.
     junk = tempfile.mkdtemp(prefix='silentfail_junk_')
